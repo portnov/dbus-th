@@ -1,0 +1,131 @@
+{-# LANGUAGE TemplateHaskell, TypeOperators, DeriveDataTypeable #-}
+
+module DBus.TH
+  (module Data.Int,
+   module Data.Word,
+   Proxy,
+   Client, BusName,
+   ObjectPath, InterfaceName,
+   MemberName, Variant,
+   connectSession, connectSystem,
+   proxy,
+   Signature (..),
+   Function (..),
+   (=::), as,
+   interface
+  ) where
+
+import Control.Monad
+import Data.Int
+import Data.Word
+import Language.Haskell.TH
+import qualified Data.Text as Text
+import Data.Char
+import Data.List
+import Data.Generics
+import DBus.Client.Simple hiding (Type, Signature)
+
+-- | Function signature
+data Signature = Return Name
+               | Name :-> Signature
+  deriving (Eq, Show, Data, Typeable)
+
+infixr 6 :->
+
+-- | Function with DBus name and Haskell name
+data Function = Function {
+    fnName      :: String    -- ^ Function name to use in Haskell
+  , fnDBusName  :: String    -- ^ Function name to use in DBus
+  , fnSignature :: Signature -- ^ Function signature
+    }
+  deriving (Eq, Show, Data, Typeable)
+
+-- | Create a Function from it's name and Signature.
+-- Sets fnDBusName == fnName.
+(=::) :: String -> Signature -> Function
+name =:: sig = Function name name sig
+
+infixr 5 =::
+
+-- | Set specific Haskell name for Function.
+as :: Function -> String -> Function
+fn `as` name = fn {fnName = name}
+
+infixl 4 `as`
+
+nArgs :: Signature -> Int
+nArgs (Return _) = 0
+nArgs (_ :-> s)  = 1 + nArgs s
+
+firstLower :: String -> String
+firstLower [] = []
+firstLower (x:xs) = toLower x: xs
+
+-- | Generate bindings for methods in specific DBus interface.
+-- If second argument is (Just prefix), then prefix will be
+-- added to the beginning of all DBus names and removed from all
+-- Haskell names.
+interface :: String       -- ^ Interface name
+          -> Maybe String -- ^ Prefix
+          -> [Function]   -- ^ List of functions
+          -> Q [Dec]
+interface ifaceName mbPrefix fns = concat `fmap` mapM iface fns
+  where
+    iface :: Function -> Q [Dec]
+    iface (Function name dbusName sig) =
+        let name'     = strip name
+            dbusName' = addPrefix dbusName
+        in sequence [generateSignature name' sig,
+                     generateImplementation name' dbusName' sig]
+
+    addPrefix :: String -> String
+    addPrefix s =
+      case mbPrefix of
+        Nothing     -> s
+        Just prefix -> prefix ++ s
+
+    strip :: String -> String
+    strip s =
+      case mbPrefix of
+        Nothing     -> s
+        Just prefix -> if prefix `isPrefixOf` s
+                         then drop (length prefix) s
+                         else s
+
+    generateSignature :: String -> Signature -> Q Dec
+    generateSignature name sig = do
+        dbt <- dbusType (transformType sig)
+        return $ SigD (mkName $ firstLower name) dbt
+
+    dbusType :: Type -> Q Type
+    dbusType t = [t| Proxy -> $(return t) |]
+
+    transformType :: Signature -> Type
+    transformType (Return t) = AppT (ConT ''IO) (AppT (ConT ''Maybe) (ConT t))
+    transformType (t :-> s)  = AppT (AppT ArrowT (ConT t)) (transformType s)
+
+    generateImplementation :: String -> String -> Signature -> Q Dec
+    generateImplementation name dbusName sig = do
+        let bus  = mkName "bus"
+        args <- replicateM (nArgs sig) (newName "x")
+        body <- generateBody dbusName sig args
+        return $ FunD (mkName $ firstLower name) [Clause (VarP bus: map VarP args) (NormalB body) []]
+
+    generateBody :: String -> Signature -> [Name] -> Q Exp
+    generateBody name sig names = do
+        [| do
+           res <- call $(varE $ mkName "bus")
+                       (interfaceName_ $ Text.pack ifaceName)
+                       (memberName_ $ Text.pack name)
+                       $(variant names) 
+           return $ fromVariant (res !! 0)
+          |]
+
+    variant :: [Name] -> Q Exp
+    variant names = do
+      exs <- mapM variant1 names
+      return $ ListE exs
+
+    variant1 :: Name -> Q Exp
+    variant1 name = [| toVariant $(varE name) |]
+
