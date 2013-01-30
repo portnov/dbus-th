@@ -3,12 +3,10 @@
 module DBus.TH
   (module Data.Int,
    module Data.Word,
-   Proxy,
    Client, BusName,
    ObjectPath, InterfaceName,
    MemberName, Variant,
    connectSession, connectSystem,
-   proxy,
    Signature (..),
    Function (..),
    (=::), as,
@@ -23,7 +21,8 @@ import qualified Data.Text as Text
 import Data.Char
 import Data.List
 import Data.Generics
-import DBus.Client.Simple hiding (Type, Signature)
+import DBus hiding (Type, Signature)
+import DBus.Client hiding (Type, Signature)
 
 -- | Function signature
 data Signature = Return Name
@@ -65,11 +64,13 @@ firstLower (x:xs) = toLower x: xs
 -- If second argument is (Just prefix), then prefix will be
 -- added to the beginning of all DBus names and removed from all
 -- Haskell names.
-interface :: String       -- ^ Interface name
+interface :: String       -- ^ Bus name
+          -> String       -- ^ Interface name
+          -> String       -- ^ Object name
           -> Maybe String -- ^ Prefix
           -> [Function]   -- ^ List of functions
           -> Q [Dec]
-interface ifaceName mbPrefix fns = concat `fmap` mapM iface fns
+interface busName objectName ifaceName mbPrefix fns = concat `fmap` mapM iface fns
   where
     iface :: Function -> Q [Dec]
     iface (Function name dbusName sig) =
@@ -98,7 +99,7 @@ interface ifaceName mbPrefix fns = concat `fmap` mapM iface fns
         return $ SigD (mkName $ firstLower name) dbt
 
     dbusType :: Type -> Q Type
-    dbusType t = [t| Proxy -> $(return t) |]
+    dbusType t = [t| Client -> $(return t) |]
 
     transformType :: Signature -> Type
     transformType (Return t) = AppT (ConT ''IO) (AppT (ConT ''Maybe) (ConT t))
@@ -114,11 +115,16 @@ interface ifaceName mbPrefix fns = concat `fmap` mapM iface fns
     generateBody :: String -> Signature -> [Name] -> Q Exp
     generateBody name sig names = do
         [| do
-           res <- call $(varE $ mkName "bus")
-                       (interfaceName_ $ Text.pack ifaceName)
-                       (memberName_ $ Text.pack name)
-                       $(variant names) 
-           return $ fromVariant (res !! 0)
+           let baseMethod = methodCall (objectPath_ objectName)
+                                       (interfaceName_ ifaceName)
+                                       (memberName_ name)
+               method = baseMethod {
+                          methodCallDestination = Just (busName_ busName),
+                          methodCallBody = $(variant names)
+                        }
+                      
+           res <- call_ $(varE $ mkName "bus") method
+           return $ fromVariant (methodReturnBody res !! 0)
           |]
 
     variant :: [Name] -> Q Exp
