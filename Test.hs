@@ -9,7 +9,7 @@ type Ints = [Int32]
 
 type Buddies = M.Map String Int32
 
-interface "im.pidgin.purple.PurpleInterface" (Just "Purple")
+interface' "im.pidgin.purple.PurpleService" Nothing "im.pidgin.purple.PurpleInterface" (Just "Purple")
     [ "Strreplace" =:: ''String :-> ''String :-> ''String :-> Return ''String `as` "replace"
     , "AccountsFind" =:: ''String :-> ''String :-> Return ''Int32
     , "AccountsGetAllActive" =:: Return ''Ints
@@ -21,18 +21,19 @@ interface "im.pidgin.purple.PurpleInterface" (Just "Purple")
 
 main = do
   [account, buddy] <- getArgs
+  let obj = "/im/pidgin/purple/PurpleObject" 
   dbus <- connectSession
-  purple <- proxy dbus "im.pidgin.purple.PurpleService" "/im/pidgin/purple/PurpleObject"
-  Just res <- replace purple "ab12cc 12 ee" "12" "ZZ"
+  Just res <- replace dbus obj "ab12cc 12 ee" "12" "ZZ"
   putStrLn res
-  Just acc <- accountsFind purple account "prpl-jabber"
-  Just buddiesL <- blistGetBuddies purple
+  Just acc <- accountsFind dbus obj account "prpl-jabber"
+  print acc
+  Just buddiesL <- blistGetBuddies dbus obj
   buddies <- forM buddiesL $ \buddy -> do
-                    Just name <- buddyGetAlias purple buddy
+                    Just name <- buddyGetAlias dbus obj buddy
                     return (name, buddy)
   let buddiesMap = M.fromList buddies
   let Just juick = M.lookup buddy buddiesMap
-  Just grp <- buddyGetGroup purple juick
-  Just grpName <- groupGetName purple grp
-  putStrLn $ buddy ++ "'s group: " ++ show grpName
+  Just grp <- buddyGetGroup dbus obj juick
+  Just grpName <- groupGetName dbus obj grp
+  putStrLn $ buddy ++ "'s group: " ++ grpName
 

@@ -11,7 +11,8 @@ module DBus.TH
    signatureResult,
    Function (..),
    (=::), as,
-   interface
+   function, interface,
+   function', interface'
   ) where
 
 import Control.Monad
@@ -70,20 +71,56 @@ signatureResult (_ :-> sig) = signatureResult sig
 -- added to the beginning of all DBus names and removed from all
 -- Haskell names.
 interface :: String       -- ^ Bus name
-          -> String       -- ^ Interface name
           -> String       -- ^ Object name
+          -> String       -- ^ Interface name
           -> Maybe String -- ^ Prefix
           -> [Function]   -- ^ List of functions
           -> Q [Dec]
-interface busName objectName ifaceName mbPrefix fns = concat `fmap` mapM iface fns
-  where
-    iface :: Function -> Q [Dec]
-    iface (Function name dbusName sig) =
-        let name'     = strip name
-            dbusName' = addPrefix dbusName
-        in sequence [generateSignature name' sig,
-                     generateImplementation name' dbusName' sig]
+interface busName objectName ifaceName mbPrefix fns =
+    interface' busName (Just objectName) ifaceName mbPrefix fns
 
+-- | Generate bindings for methods in specific DBus interface.
+-- If second argument is (Just prefix), then prefix will be
+-- added to the beginning of all DBus names and removed from all
+-- Haskell names.
+interface' :: String      -- ^ Bus name
+          -> Maybe String -- ^ Just name - use fixed object name; Nothing - object name will be 2nd argument of generated functions
+          -> String       -- ^ Interface name
+          -> Maybe String -- ^ Prefix
+          -> [Function]   -- ^ List of functions
+          -> Q [Dec]
+interface' busName mbObjectName ifaceName mbPrefix fns =
+    concat `fmap` mapM (function' busName mbObjectName ifaceName mbPrefix) fns
+
+-- | Generate binding for one method in specific DBus interface.
+-- If second argument is (Just prefix), then prefix will be
+-- added to the beginning of all DBus names and removed from all
+-- Haskell names.
+function :: String       -- ^ Bus name
+          -> String       -- ^ Object name
+          -> String       -- ^ Interface name
+          -> Maybe String -- ^ Prefix
+          -> Function   -- ^ Function
+          -> Q [Dec]
+function busName objectName ifaceName mbPrefix fn =
+    function' busName (Just objectName) ifaceName mbPrefix fn
+
+-- | Generate binding for one method in specific DBus interface.
+-- If second argument is (Just prefix), then prefix will be
+-- added to the beginning of all DBus names and removed from all
+-- Haskell names.
+function' :: String       -- ^ Bus name
+          -> Maybe String -- ^ Just name - use fixed object name; Nothing - object name will be 2nd argument of generated function
+          -> String       -- ^ Interface name
+          -> Maybe String -- ^ Prefix
+          -> Function     -- ^ Function
+          -> Q [Dec]
+function' busName mbObjectName ifaceName mbPrefix (Function name dbusName sig) =
+    let name'     = strip name
+        dbusName' = addPrefix dbusName
+    in sequence [generateSignature name' sig,
+                 generateImplementation name' dbusName' sig]
+  where
     addPrefix :: String -> String
     addPrefix s =
       case mbPrefix of
@@ -104,7 +141,10 @@ interface busName objectName ifaceName mbPrefix fns = concat `fmap` mapM iface f
         return $ SigD (mkName $ firstLower name) dbt
 
     dbusType :: Type -> Q Type
-    dbusType t = [t| Client -> $(return t) |]
+    dbusType t =
+      case mbObjectName of
+        Just _ -> [t| Client -> $(return t) |]
+        Nothing -> [t| Client -> String -> $(return t) |]
 
     transformType :: Signature -> Type
     transformType (Return t) =
@@ -116,14 +156,21 @@ interface busName objectName ifaceName mbPrefix fns = concat `fmap` mapM iface f
     generateImplementation :: String -> String -> Signature -> Q Dec
     generateImplementation name dbusName sig = do
         let bus  = mkName "bus"
+        objectName <- newName "object"
         args <- replicateM (nArgs sig) (newName "x")
-        body <- generateBody dbusName sig args
-        return $ FunD (mkName $ firstLower name) [Clause (VarP bus: map VarP args) (NormalB body) []]
+        body <- generateBody dbusName objectName sig args
+        let varArgs = case mbObjectName of
+                        Just _ -> VarP bus : map VarP args
+                        Nothing -> VarP bus : VarP objectName : map VarP args
+        return $ FunD (mkName $ firstLower name) [Clause varArgs (NormalB body) []]
 
-    generateBody :: String -> Signature -> [Name] -> Q Exp
-    generateBody name sig names = do
+    generateBody :: String -> Name -> Signature -> [Name] -> Q Exp
+    generateBody name objectName sig names = do
         [| do
-           let baseMethod = methodCall (objectPath_ objectName)
+           let baseMethod = methodCall (objectPath_ $(case mbObjectName of
+                                                        Just oname -> litE (StringL oname)
+                                                        Nothing -> varE objectName
+                                                      ))
                                        (interfaceName_ ifaceName)
                                        (memberName_ name)
                method = baseMethod {
