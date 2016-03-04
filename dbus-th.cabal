@@ -2,7 +2,7 @@
 -- documentation, see http://haskell.org/cabal/users-guide/
 
 name:                dbus-th
-version:             0.1.1.1
+version:             0.1.1.2
 synopsis:            TemplateHaskell generator of DBus bindings
 description:         This package provides functions to easily generate bindings for
                      DBus functions. See Test.hs for examples.
@@ -26,5 +26,5 @@ library
 
 Source-repository head
   type:     git
-  location: git://home.iportnov.ru/dbus-th.git
+  location: https://github.com/portnov/dbus-th.git
 
