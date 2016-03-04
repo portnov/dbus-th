@@ -8,6 +8,7 @@ module DBus.TH
    MemberName, Variant,
    connectSession, connectSystem,
    Signature (..),
+   signatureResult,
    Function (..),
    (=::), as,
    interface
@@ -60,6 +61,10 @@ firstLower :: String -> String
 firstLower [] = []
 firstLower (x:xs) = toLower x: xs
 
+signatureResult :: Signature -> Name
+signatureResult (Return name) = name
+signatureResult (_ :-> sig) = signatureResult sig
+
 -- | Generate bindings for methods in specific DBus interface.
 -- If second argument is (Just prefix), then prefix will be
 -- added to the beginning of all DBus names and removed from all
@@ -102,7 +107,10 @@ interface busName objectName ifaceName mbPrefix fns = concat `fmap` mapM iface f
     dbusType t = [t| Client -> $(return t) |]
 
     transformType :: Signature -> Type
-    transformType (Return t) = AppT (ConT ''IO) (AppT (ConT ''Maybe) (ConT t))
+    transformType (Return t) =
+      if t == ''()
+        then AppT (ConT ''IO) (ConT ''())
+        else AppT (ConT ''IO) (AppT (ConT ''Maybe) (ConT t))
     transformType (t :-> s)  = AppT (AppT ArrowT (ConT t)) (transformType s)
 
     generateImplementation :: String -> String -> Signature -> Q Dec
@@ -124,7 +132,10 @@ interface busName objectName ifaceName mbPrefix fns = concat `fmap` mapM iface f
                         }
                       
            res <- call_ $(varE $ mkName "bus") method
-           return $ fromVariant (methodReturnBody res !! 0)
+           $(if signatureResult sig /= ''() 
+             then [| return $ fromVariant (methodReturnBody res !! 0) |]
+             else [| return () |]
+            )
           |]
 
     variant :: [Name] -> Q Exp
