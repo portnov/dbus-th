@@ -62,6 +62,7 @@ firstLower :: String -> String
 firstLower [] = []
 firstLower (x:xs) = toLower x: xs
 
+-- | Return type name for signature
 signatureResult :: Signature -> Name
 signatureResult (Return name) = name
 signatureResult (_ :-> sig) = signatureResult sig
