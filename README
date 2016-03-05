@@ -1,0 +1,35 @@
+
+This package is aimed to simplify usage of methods available via DBus.
+
+For example, one may write
+
+    interface "org.freedesktop.DBus" "/" "org.freedesktop.DBus" Nothing [
+        "ListNames" =:: Return ''ListStr
+      ]
+
+and then a function listNames :: Client -> IO (Maybe ListStr) will be available:
+
+    main :: IO ()
+    main = do
+      dbus <- connectSession
+      r <- listNames dbus
+      case r of
+        Nothing -> putStrLn "DBus function returned unexpected data type"
+        Just list -> forM_ list putStrLn
+
+Object names can be also provided dynamically instead of encoding them into 
+function declaration; for that, use '-versions of "interface" and "function":
+
+    interface' "org.kde.konsole" Nothing "org.kde.konsole.Window" [
+        "newSession" =:: ''String :-> ''String :-> Return ''Int32
+      ]
+
+and then a function newSession :: Client -> String -> String -> String -> IO (Maybe Int32)
+will be available:
+
+    r <- newSession dbus "/Windows/1" "Command Shell" "/home/user"
+    case r of
+      Nothing -> putStrLn "Unexpected"
+      Just x -> putStrLn $ "New session ID is " ++ show x
+
+
