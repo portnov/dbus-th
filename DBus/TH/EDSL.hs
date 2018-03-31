@@ -1,6 +1,6 @@
 {-# LANGUAGE TemplateHaskell, TypeOperators, DeriveDataTypeable #-}
 
-module DBus.TH
+module DBus.TH.EDSL
   (module Data.Int,
    module Data.Word,
    Client, BusName,

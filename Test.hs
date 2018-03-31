@@ -2,7 +2,7 @@
 
 import Control.Monad
 import qualified Data.Map as M
-import DBus.TH
+import DBus.TH.EDSL
 import System.Environment
 
 type Ints = [Int32]
