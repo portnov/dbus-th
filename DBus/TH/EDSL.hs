@@ -27,7 +27,8 @@ import DBus hiding (Type, Signature)
 import DBus.Client hiding (Type, Signature)
 
 -- | Function signature
-data Signature = Return Name
+data Signature = Return Name    -- ^ Call returning a single value.
+               | Returns [Name] -- ^ Call returning multiple values.
                | Name :-> Signature
   deriving (Eq, Show, Data, Typeable)
 
@@ -56,6 +57,7 @@ infixl 4 `as`
 
 nArgs :: Signature -> Int
 nArgs (Return _) = 0
+nArgs (Returns _) = 0
 nArgs (_ :-> s)  = 1 + nArgs s
 
 firstLower :: String -> String
@@ -63,8 +65,9 @@ firstLower [] = []
 firstLower (x:xs) = toLower x: xs
 
 -- | Return type name for signature
-signatureResult :: Signature -> Name
-signatureResult (Return name) = name
+signatureResult :: Signature -> [Name]
+signatureResult (Return name) = [name]
+signatureResult (Returns ns) = ns
 signatureResult (_ :-> sig) = signatureResult sig
 
 -- | Generate bindings for methods in specific DBus interface.
@@ -153,6 +156,13 @@ function' busName mbObjectName ifaceName mbPrefix (Function name dbusName sig) =
         then AppT (ConT ''IO) (ConT ''())
         else AppT (ConT ''IO) (AppT (ConT ''Maybe) (ConT t))
     transformType (t :-> s)  = AppT (AppT ArrowT (ConT t)) (transformType s)
+    transformType (Returns ts) = AppT (ConT ''IO) (AppT (ConT ''Maybe) (toType ts))
+      where
+        toType :: [Name] -> Type
+        toType [] = ConT ''()
+        toType ts = mkTuple (length ts) ts
+        mkTuple size [t] = AppT (TupleT size) (ConT t)
+        mkTuple size ts = AppT (mkTuple size $ init ts) (ConT $ last ts)
 
     generateImplementation :: String -> String -> Signature -> Q Dec
     generateImplementation name dbusName sig = do
@@ -164,6 +174,13 @@ function' busName mbObjectName ifaceName mbPrefix (Function name dbusName sig) =
                         Just _ -> VarP bus : map VarP args
                         Nothing -> VarP bus : VarP objectName : map VarP args
         return $ FunD (mkName $ firstLower name) [Clause varArgs (NormalB body) []]
+
+    generateReturn :: [Name] -> Q Exp
+    generateReturn [t] =
+      if t == ''()
+        then [| () |]
+        else [| fromVariant (head (methodReturnBody res)) |]
+    generateReturn ts = [| toTuple (methodReturnBody res) >>= fromVariant|]
 
     generateBody :: String -> Name -> Signature -> [Name] -> Q Exp
     generateBody name objectName sig names = do
@@ -178,13 +195,28 @@ function' busName mbObjectName ifaceName mbPrefix (Function name dbusName sig) =
                           methodCallDestination = Just (busName_ busName),
                           methodCallBody = $(variant names)
                         }
-                      
            res <- call_ $(varE $ mkName "bus") method
-           $(if signatureResult sig /= ''() 
-             then [| return $ fromVariant (methodReturnBody res !! 0) |]
-             else [| return () |]
-            )
+           pure $(returnValue $ signatureResult sig)
           |]
+        where
+          returnValue :: [Name] -> Q Exp
+          returnValue [t]
+            | t == ''() = [| return () |]
+            | otherwise = [| fromVariant (head (methodReturnBody res)) |]
+          returnValue ts  = do
+            patVars <- traverse newName $ ("a" ++) . show <$> [1..length ts]
+            bindVars <- traverse newName $ ("m" ++) . show <$> [1..length ts]
+            fn <- newName "parseShape"
+            let body :: Quote m => m Body
+                body = normalB $ doE
+                  (zipWith bindFromVariant bindVars patVars
+                  ++ [ mkReturn ])
+                bindFromVariant var pat = bindS (varP var) (appE [|fromVariant|] (varE pat))
+                mkReturn :: Quote m => m Stmt
+                mkReturn = noBindS $ appE [|pure|] (tupE $ varE <$> bindVars)
+                clause1 = clause [listP (varP <$> patVars)] body []
+                clause2 = clause [wildP] (normalB [| Nothing |]) []
+            letE [funD fn [clause1, clause2]] [| $(varE fn) (methodReturnBody res) |]
 
     variant :: [Name] -> Q Exp
     variant names = do

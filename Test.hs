@@ -19,6 +19,11 @@ interface' "im.pidgin.purple.PurpleService" Nothing "im.pidgin.purple.PurpleInte
     , "BlistGetBuddies" =:: Return ''Ints
     , "BuddyGetAlias" =:: ''Int32 :-> Return ''String ]
 
+-- Compile-only test.
+interface' "org.freedesktop.secrets" (Just "/org/freedesktop/secrets") "org.freedesktop.Secret.Service" Nothing
+    [ "OpenSession" =:: ''String :-> ''Variant :-> Returns [''Variant, ''ObjectPath]
+    ]
+
 main = do
   [account, buddy] <- getArgs
   let obj = "/im/pidgin/purple/PurpleObject" 
