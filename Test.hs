@@ -22,6 +22,7 @@ interface' "im.pidgin.purple.PurpleService" Nothing "im.pidgin.purple.PurpleInte
 -- Compile-only test.
 interface' "org.freedesktop.secrets" (Just "/org/freedesktop/secrets") "org.freedesktop.Secret.Service" Nothing
     [ "OpenSession" =:: ''String :-> ''Variant :-> Returns [''Variant, ''ObjectPath]
+    , "ItemChanged" =:: Return ''()
     ]
 
 main = do
