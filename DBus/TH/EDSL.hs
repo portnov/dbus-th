@@ -201,7 +201,7 @@ function' busName mbObjectName ifaceName mbPrefix (Function name dbusName sig) =
         where
           returnValue :: [Name] -> Q Exp
           returnValue [t]
-            | t == ''() = [| return () |]
+            | t == ''() = [| () |]
             | otherwise = [| fromVariant (head (methodReturnBody res)) |]
           returnValue ts  = do
             patVars <- traverse newName $ ("a" ++) . show <$> [1..length ts]
